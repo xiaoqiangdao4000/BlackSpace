@@ -1,74 +1,100 @@
+import { _decorator, Component, CCInteger, EventTouch, Node, misc, Vec3, Vec2, CCBoolean } from 'cc'
+import { instance, SpeedType } from './Joystick/Joystick'
+import type { JoystickDataType } from './Joystick/Joystick'
 
-// 导入Joystick脚本
-import joy from "./Joystick/Joystick"
+const { ccclass, property } = _decorator
 
-import { _decorator, Component, Node, CCLoader, CCFloat, Vec2, log } from 'cc';
-const { ccclass, property } = _decorator;
+@ccclass('Player')
+export default class Player extends Component {
+    @property({
+        type: CCInteger,
+        tooltip: 'Speed at stop.',
+    })
+    stopSpeed = 0
 
-@ccclass('hero')
-export class heros extends Component {
+    @property({
+        type: CCInteger,
+        tooltip: 'Normal speed.',
+    })
+    normalSpeed = 100
 
+    @property({
+        type: CCInteger,
+        tooltip: 'Fast speed.',
+    })
+    fastSpeed = 200
 
-    @property({displayName: "摇杆脚本所在节点", tooltip: "摇杆脚本Joystick所在脚本", type: joy})
-    joy: joy = null!;
+    @property({
+        tooltip: '旋转',
+    })
+    isRotate = true
+    moveDir = new Vec3(0, 1, 0)
+    _speedType: SpeedType = SpeedType.STOP
+    _moveSpeed = 0
 
-
-    @property({displayName: "角色", tooltip: "角色", type: Node})
-    player: Node = null!;
-
-
-    @property({displayName: "是否根据方向旋转角色", tooltip: "角色是否根据摇杆的方向旋转"})
-    is_angle: boolean = true;
-
-
-    @property({displayName: "是否禁锢角色", tooltip: "是否禁锢角色，如果角色被禁锢，角色就动不了了"})
-    is_fbd_player: boolean = false;
-
-
-    @property({displayName: "角色移动速度", tooltip: "角色移动速度，不建议太大，1-10最好", type: CCFloat})
-    speed: number = 3;
-
-
-    // 角色的移动向量
-    vector: Vec2 = new Vec2(0, 0);
-
-    // 角色旋转的角度
-    angle: number = 0;
-
-
-    update () {
-        // console.log("vector", this.vector.toString(), "angle", this.angle);
-        
-
-        // 如果没有禁锢角色
-        if (this.is_fbd_player == false) {
-            // 获取角色移动向量
-            this.vector = this.joy.vector;
-
-            // 向量归一化
-            let dir = this.vector.normalize();
-
-            // 乘速度
-            let dir_x = dir.x * this.speed;
-            let dir_y = dir.y * this.speed;
-
-            // 角色坐标加上方向
-            let x = this.player.position.x + dir_x;
-            let y = this.player.position.y + dir_y;
-
-            // 设置角色坐标
-            this.player.setPosition(x, y);
-        }
-
-        // 如果根据方向旋转角色
-        if (this.is_angle == true) {
-            // 获取角色旋转的角度
-            this.angle = this.joy.angle;
-            // 对角色进行旋转
-            this.player.angle = this.angle;
-        }
-        
+    onLoad() {
+        instance.on(Node.EventType.TOUCH_START, this.onTouchStart, this)
+        instance.on(Node.EventType.TOUCH_MOVE, this.onTouchMove, this)
+        instance.on(Node.EventType.TOUCH_END, this.onTouchEnd, this)
     }
 
+    onTouchStart() { }
 
+    onTouchMove(event: EventTouch, data: JoystickDataType) {
+        this._speedType = data.speedType
+        this.moveDir = data.moveVec
+        this.onSetMoveSpeed(this._speedType)
+    }
+
+    onTouchEnd(event: EventTouch, data: JoystickDataType) {
+        this._speedType = data.speedType
+        this.onSetMoveSpeed(this._speedType)
+    }
+
+    /**
+     * set moveSpeed by SpeedType
+     * @param speedType
+     */
+    onSetMoveSpeed(speedType: SpeedType) {
+        switch (speedType) {
+            case SpeedType.STOP:
+                this._moveSpeed = this.stopSpeed
+                break
+            case SpeedType.NORMAL:
+                this._moveSpeed = this.normalSpeed
+                break
+            case SpeedType.FAST:
+                this._moveSpeed = this.fastSpeed
+                break
+            default:
+                break
+        }
+    }
+
+    /**
+     * Movement
+     */
+    move() {
+        if(this.isRotate)
+        {
+            this.node.angle = misc.radiansToDegrees(Math.atan2(this.moveDir.y, this.moveDir.x)) - 90
+        }
+        
+        const oldPos = this.node.getPosition()
+        const newPos = oldPos.add(
+            // fps: 60
+            this.moveDir.clone().multiplyScalar(this._moveSpeed / 60)
+        )
+        console.log(this._moveSpeed / 60)
+        this.node.setPosition(newPos)
+
+        console.log(newPos)
+
+    }
+
+    update(deltaTime: number) {
+        if (this._speedType !== SpeedType.STOP) {
+            this.move()
+        }
+    }
 }

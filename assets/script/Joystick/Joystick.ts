@@ -1,189 +1,258 @@
-
-import { _decorator, Component, Node, CCFloat, CCBoolean, Vec2, Vec3, math, log, Event, EventTouch, UITransformComponent, UITransform, CameraComponent } from 'cc';
-const { ccclass, property } = _decorator;
-
-@ccclass('Joystick')
-export default class Joystick extends Component {
-
-
-    @property({displayName: "canvas下的相机，只拍UI的那个", tooltip: "canvas下的相机，只拍UI的那个", type: CameraComponent})
-    camera: CameraComponent = null!;
-
-
-    @property({displayName: "父节点", tooltip: "摇杆中心点和背景的父节点，需要用这个节点来做坐标转换", type: UITransformComponent})
-    parent: UITransformComponent = null!;
-
-    @property({displayName: "触摸区域节点", tooltip: "触摸区域", type: Node})
-    touchNode: Node = null!;
-
-    @property({displayName: "摇杆背景", tooltip: "摇杆背景", type: Node})
-    bg: Node = null!;
-
-    @property({displayName: "摇杆中心点", tooltip: "摇杆中心点", type: Node})
-    joystick: Node = null!;
-
-
-
-    @property({displayName: "最大半径", tooltip: "摇杆移动的最大半径", type: CCFloat})
-    max_R: number = 135;
-
-
-    
-
-    @property({displayName: "是否禁用摇杆", tooltip: "是否禁用摇杆，禁用后摇杆将不能摇动"})
-    is_forbidden: boolean = false;
-
-
-    // 角色旋转的角度，不要轻易修改
-    angle: number = 0;
-
-    // 移动向量
-    vector: Vec2 = new Vec2(0, 0);
-
-
-    onLoad () {
-        // 绑定事件
-        // 因为摇杆中心点很小，如果给摇杆中心点绑定事件玩家将很难控制，摇杆的背景比较大，所以把事件都绑定在背景上是不错的选择，这样体验更好
-
-        // 手指移动
-        this.touchNode.on(Node.EventType.TOUCH_MOVE,this.move,this);
-        // 手指结束
-        this.touchNode.on(Node.EventType.TOUCH_END,this.finish,this);
-        // 手指取消
-        this.touchNode.on(Node.EventType.TOUCH_CANCEL,this.finish,this);
+import {
+    _decorator,
+    EventTarget,
+    Component,
+    Node,
+    Enum,
+    UIOpacity,
+    UITransform,
+    EventTouch,
+    Vec3,
+    Vec2,
+    Size,
+    CCInteger,
+  } from 'cc'
+  
+  const { ccclass, property } = _decorator
+  
+  /**
+   * Global event listener instance
+   */
+  export const instance = new EventTarget()
+  
+  export const SET_JOYSTICK_TYPE = 'SET_JOYSTICK_TYPE'
+  
+  /**
+   * Direction type
+   */
+  export enum DirectionType {
+    FOUR,
+    EIGHT,
+    ALL,
+  }
+  
+  /**
+   * Speed type
+   */
+  export enum SpeedType {
+    STOP,
+    NORMAL,
+    FAST,
+  }
+  
+  /**
+   * Joystick type
+   */
+  export enum JoystickType {
+    FIXED,
+    FOLLOW,
+  }
+  
+  export interface JoystickDataType {
+    speedType: SpeedType
+    /**
+     * Movement vector
+     */
+    moveVec: Vec3
+  }
+  
+  /**
+   * Joystick
+   */
+  @ccclass('Joystick')
+  export class Joystick extends Component {
+    @property({
+      type: Node,
+      displayName: '摇杆点Dot',
+      tooltip: 'Joystick control point.',
+    })
+    dot: Node | null = null
+  
+    @property({
+      type: Node,
+      displayName: '摇杆节点Ring',
+      tooltip: 'Joystick background node.',
+    })
+    ring: Node | null = null
+  
+    @property({
+      type: Enum(JoystickType),
+      displayName: '摇杆类型Type',
+      tooltip: 'Touch type.',
+    })
+    joystickType = JoystickType.FIXED
+  
+    @property({
+      type: Enum(DirectionType),
+      displayName: 'Direction Type',
+      tooltip: 'Direction type.',
+    })
+    directionType = DirectionType.ALL
+  
+    @property({
+      tooltip: 'The position of the joystick.',
+    })
+    _stickPos = new Vec3()
+  
+    @property({
+      tooltip: 'Touch location.',
+    })
+    _touchLocation = new Vec2()
+  
+    @property({
+      type: CCInteger,
+      displayName: '半径Ring Radius',
+      tooltip: 'Ring radius.',
+    })
+    radius = 50
+  
+    onLoad() {
+      if (!this.dot) {
+        console.warn('Joystick Dot is null!')
+        return
+      }
+  
+      if (!this.ring) {
+        console.warn('Joystick Ring is null!')
+        return
+      }
+  
+      const uiTransform = this.ring.getComponent(UITransform)
+      const size = this.radius * 2
+      const ringSize = new Size(size, size)
+      uiTransform?.setContentSize(ringSize)
+      this.ring.getChildByName('BG')!.getComponent(UITransform)?.setContentSize(ringSize)
+  
+      this._initTouchEvent()
+      // hide joystick when follow
+      const uiOpacity = this.node.getComponent(UIOpacity)
+      if (this.joystickType === JoystickType.FOLLOW && uiOpacity) {
+        uiOpacity.opacity = 0
+      }
     }
-
-
-    update () {
-        
-        // 如果角色的移动向量为(0, 0)，就不执行以下代码
-        if (this.vector.x == 0 && this.vector.y == 0) {
-            return;
+  
+    /**
+     * When enabled
+     */
+    onEnable() {
+      instance.on(SET_JOYSTICK_TYPE, this._onSetJoystickType, this)
+    }
+  
+    /**
+     * When disabled
+     */
+    onDisable() {
+      instance.off(SET_JOYSTICK_TYPE, this._onSetJoystickType, this)
+    }
+  
+    /**
+     * Change joystick type
+     * @param type
+     */
+    _onSetJoystickType(type: JoystickType) {
+      this.joystickType = type
+      const uiOpacity = this.node.getComponent(UIOpacity)
+      if (uiOpacity) {
+        uiOpacity.opacity = type === JoystickType.FIXED ? 255 : 0
+      }
+    }
+  
+    /**
+     * Initialize touch events
+     */
+    _initTouchEvent() {
+      // set the size of joystick node to control scale
+      this.node.on(Node.EventType.TOUCH_START, this._touchStartEvent, this)
+      this.node.on(Node.EventType.TOUCH_MOVE, this._touchMoveEvent, this)
+      this.node.on(Node.EventType.TOUCH_END, this._touchEndEvent, this)
+      this.node.on(Node.EventType.TOUCH_CANCEL, this._touchEndEvent, this)
+    }
+  
+    /**
+     * Touch start callback function
+     * @param event
+     */
+    _touchStartEvent(event: EventTouch) {
+      if (!this.ring || !this.dot) return
+  
+      instance.emit(Node.EventType.TOUCH_START, event)
+  
+      const location = event.getUILocation()
+      const touchPos = new Vec3(location.x, location.y)
+  
+      if (this.joystickType === JoystickType.FIXED) {
+        this._stickPos = this.ring.getPosition()
+  
+        // Vector relative to center
+        const moveVec = touchPos.subtract(this.ring.getPosition())
+        // The distance between the touch point and the center of the circle
+        const distance = moveVec.length()
+  
+        // The finger touches inside the circle, the joystick follows the touch point
+        if (this.radius > distance) {
+          this.dot.setPosition(moveVec)
         }
-
-        // 求出角色旋转的角度
-        let angle = this.vector_to_angle(this.vector);
-        // 赋值给angle，Player脚本将会获取angle
-        this.angle = angle;
-
+      } else if (this.joystickType === JoystickType.FOLLOW) {
+        // Record the joystick position and use it for touch move
+        this._stickPos = touchPos
+        this.node.getComponent(UIOpacity)!.opacity = 255
+        this._touchLocation = event.getUILocation()
+        // Change the position of the joystick
+        this.ring.setPosition(touchPos)
+        this.dot.setPosition(new Vec3())
+      }
     }
-
-
-    // 手指移动时调用，移动摇杆专用函数
-    move (event: EventTouch) {
-
-        // 如果没有禁用摇杆
-        if(this.is_forbidden == false){
-
-            /*
-            通过点击屏幕获得的点的坐标是屏幕坐标
-            必须先用相机从屏幕坐标转到世界坐标
-            再从世界坐标转到节点坐标
-
-            就这个问题折腾了很久
-            踩坑踩坑踩坑
-            */
-
-            // 获取触点的位置，屏幕坐标
-            let point = new Vec2(event.getLocationX(), event.getLocationY());
-            // 屏幕坐标转为世界坐标
-            let world_point = this.camera.screenToWorld(new Vec3(point.x, point.y));
-            // 世界坐标转节点坐标
-            // 将一个点转换到节点 (局部) 空间坐标系，这个坐标系以锚点为原点。
-            let pos = this.parent.convertToNodeSpaceAR(new Vec3(world_point.x, world_point.y));
-
-            // 如果触点长度小于我们规定好的最大半径
-            if (pos.length() < this.max_R) {
-                // 摇杆的坐标为触点坐标
-                this.joystick.setPosition(pos.x, pos.y);
-            } else {// 如果不
-
-                // 将向量归一化
-                let pos_ = pos.normalize();
-                // 归一化的坐标 * 最大半径
-                let x = pos_.x * this.max_R;
-                let y = pos_.y * this.max_R;
-
-                // 赋值给摇杆
-                this.joystick.setPosition(x, y);
-            }
-
-            // 把摇杆中心点坐标，也就是角色移动向量赋值给vector
-            this.vector = new Vec2(this.joystick.position.x, this.joystick.position.y);
-        }
-        // 如果摇杆被禁用 
-        else {
-            // 弹回摇杆
-            this.finish();
-        }
-
-
+  
+    /**
+     * Touch move callback function
+     * @param event
+     */
+    _touchMoveEvent(event: EventTouch) {
+      if (!this.dot || !this.ring) return
+  
+      // If the touch start position is the same as touch move, move is prohibited
+      if (this.joystickType === JoystickType.FOLLOW && this._touchLocation === event.getUILocation()) {
+        return
+      }
+  
+      // Get touch coordinates with circle as anchor
+      const location = event.getUILocation()
+      const touchPos = new Vec3(location.x, location.y)
+      // Move vector
+      const moveVec = touchPos.subtract(this.ring.getPosition())
+      const distance = moveVec.length()
+  
+      let speedType = SpeedType.NORMAL
+      if (this.radius > distance) {
+        this.dot.setPosition(moveVec)
+        speedType = SpeedType.NORMAL
+      } else {
+        // The joystick stays in the circle forever and follows the touch to update the angle in the circle
+        this.dot.setPosition(moveVec.normalize().multiplyScalar(this.radius))
+        speedType = SpeedType.FAST
+      }
+  
+      instance.emit(Node.EventType.TOUCH_MOVE, event, {
+        speedType,
+        moveVec: moveVec.normalize(),
+      })
     }
-
-    
-    // 摇杆中心点弹回原位置专用函数
-    finish () {
-        // 摇杆坐标和移动向量都设为（0,0）
-        this.joystick.position = new Vec3(0, 0);
-        this.vector = new Vec2(0, 0);
+  
+    /**
+     * Touch end callback function
+     * @param event
+     */
+    _touchEndEvent(event: EventTouch) {
+      if (!this.dot || !this.ring) return
+  
+      this.dot.setPosition(new Vec3())
+      if (this.joystickType === JoystickType.FOLLOW) {
+        this.node.getComponent(UIOpacity)!.opacity = 0
+      }
+  
+      instance.emit(Node.EventType.TOUCH_END, event, {
+        speedType: SpeedType.STOP,
+      })
     }
-
-
-
-    // 角度转弧度
-    angle_to_radian (angle: number): number {
-        // 角度转弧度公式
-        // π / 180 * 角度
-
-        // 计算出弧度
-        let radian = Math.PI / 180 * angle;
-        // 返回弧度
-        return(radian);
-    }
-
-
-    // 弧度转角度
-    radian_to_angle (radian: number): number {
-        // 弧度转角度公式
-        // 180 / π * 弧度
-
-        // 计算出角度
-        let angle = 180 / Math.PI * radian;
-        // 返回弧度
-        return(angle);
-    }
-
-
-    // 角度转向量   
-    angle_to_vector (angle: number): Vec2 {
-        // tan = sin / cos
-        // 将传入的角度转为弧度
-        let radian = this.angle_to_radian(angle);
-        // 算出cos,sin和tan
-        let cos = Math.cos(radian);// 邻边 / 斜边
-        let sin = Math.sin(radian);// 对边 / 斜边
-        let tan = sin / cos;// 对边 / 邻边
-        // 结合在一起并归一化
-        let vec = new Vec2(cos, sin).normalize();
-        // 返回向量
-        return(vec);
-    }
-
-
-    // 向量转角度
-    vector_to_angle (vector: Vec2): number {
-        // 将传入的向量归一化
-        let dir = vector.normalize();
-        // 计算出目标角度的弧度
-        let radian = dir.signAngle(new Vec2(1, 0));
-        // 把弧度计算成角度
-        let angle = -this.radian_to_angle(radian);
-        // 返回角度
-        return(angle);
-    }
-
-
-    
-
-    
-}
+  }
+  
