@@ -4,5 +4,32 @@
       "width": 750,
       "height": 1334
     }
+  },
+  "physics": {
+    "collisionGroups": [
+      {
+        "index": 1,
+        "name": "hero"
+      },
+      {
+        "index": 2,
+        "name": "herobullet"
+      },
+      {
+        "index": 3,
+        "name": "enemy"
+      },
+      {
+        "index": 4,
+        "name": "enemybullet"
+      }
+    ],
+    "collisionMatrix": {
+      "0": 1,
+      "1": 24,
+      "2": 24,
+      "3": 6,
+      "4": 6
+    }
   }
 }
